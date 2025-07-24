@@ -84,6 +84,11 @@ if ($_SERVER['REQUEST_METHOD'] === 'POST') {
         
         $task_id = mysqli_insert_id($connection);
         
+        // ===== NOTIFICATION SYSTEM ADDITION START ===== //
+        $notification_message = "New Task: $title (Due: $due_date)";
+        $notif_stmt = mysqli_prepare($connection, "INSERT INTO notifications (user_id, message) VALUES (?, ?)");
+        // ===== NOTIFICATION SYSTEM ADDITION END ===== //
+        
         // Handle assignments with prepared statements
         if ($is_bulk) {
             $users = mysqli_query($connection, "SELECT id FROM users");
@@ -95,6 +100,12 @@ if ($_SERVER['REQUEST_METHOD'] === 'POST') {
                 if (!mysqli_stmt_execute($assign_stmt)) {
                     throw new Exception("Bulk assignment failed: " . mysqli_error($connection));
                 }
+                
+                // ===== NOTIFICATION SYSTEM ADDITION START ===== //
+                // Add notification for each user in bulk assignment
+                mysqli_stmt_bind_param($notif_stmt, "is", $user['id'], $notification_message);
+                mysqli_stmt_execute($notif_stmt);
+                // ===== NOTIFICATION SYSTEM ADDITION END ===== //
             }
         } else {
             $assign_query = "INSERT INTO task_assignments (task_id, user_id) VALUES (?, ?)";
@@ -103,10 +114,16 @@ if ($_SERVER['REQUEST_METHOD'] === 'POST') {
             if (!mysqli_stmt_execute($assign_stmt)) {
                 throw new Exception("Assignment failed: " . mysqli_error($connection));
             }
+            
+            // ===== NOTIFICATION SYSTEM ADDITION START ===== //
+            // Add notification for single user assignment
+            mysqli_stmt_bind_param($notif_stmt, "is", $assign_to, $notification_message);
+            mysqli_stmt_execute($notif_stmt);
+            // ===== NOTIFICATION SYSTEM ADDITION END ===== //
         }
         
         mysqli_commit($connection);
-        $_SESSION['success'] = "Task created successfully!";
+        $_SESSION['success'] = "Task created and notifications sent successfully!";
         header("Location: admin_dashboard.php");
         exit();
     } catch (Exception $e) {

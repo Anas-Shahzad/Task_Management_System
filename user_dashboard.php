@@ -2,6 +2,18 @@
 session_start();
 require_once 'includes/connection.php';
 
+// Check if user is logged in
+if (!isset($_SESSION['user_id'])) {
+    header("Location: user_login.php");
+    exit();
+}
+
+$unread_notifications = 0;
+$notification_stmt = mysqli_prepare($connection, "SELECT COUNT(*) FROM notifications WHERE user_id = ? AND is_read = FALSE");
+mysqli_stmt_bind_param($notification_stmt, "i", $_SESSION['user_id']);
+mysqli_stmt_execute($notification_stmt);
+$unread_notifications = mysqli_fetch_row(mysqli_stmt_get_result($notification_stmt))[0];
+
 // Get user stats
 $stats_query = "SELECT 
     COUNT(ta.task_id) as total_tasks,
@@ -47,7 +59,7 @@ $upcoming_deadlines = mysqli_fetch_all(mysqli_stmt_get_result($deadlines_stmt), 
 ?>
 
 <!DOCTYPE html>
-<html lang="en">
+<html lang="en" data-bs-theme="light">
 <head>
     <meta charset="UTF-8">
     <meta name="viewport" content="width=device-width, initial-scale=1.0">
@@ -56,6 +68,34 @@ $upcoming_deadlines = mysqli_fetch_all(mysqli_stmt_get_result($deadlines_stmt), 
     <link href="https://fonts.googleapis.com/css2?family=Poppins:wght@300;400;500;600&display=swap" rel="stylesheet">
     <link rel="stylesheet" href="https://cdn.jsdelivr.net/npm/bootstrap-icons@1.8.1/font/bootstrap-icons.css">
     <style>
+                .notification-bell {
+            position: relative;
+            font-size: 1.5rem;
+            color: white;
+            cursor: pointer;
+            margin-right: 15px;
+        }
+        .notification-badge {
+            position: absolute;
+            top: -5px;
+            right: -5px;
+            background: #ff4757;
+            color: white;
+            border-radius: 50%;
+            width: 20px;
+            height: 20px;
+            display: flex;
+            align-items: center;
+            justify-content: center;
+            font-size: 0.7rem;
+        }
+        .toast-notification {
+            position: fixed;
+            bottom: 20px;
+            right: 20px;
+            z-index: 1100;
+        }
+
         :root {
             --primary-color: #4361ee;
             --secondary-color: #3f37c9;
@@ -66,10 +106,22 @@ $upcoming_deadlines = mysqli_fetch_all(mysqli_stmt_get_result($deadlines_stmt), 
             --danger-color: #f94144;
         }
         
+        [data-bs-theme="dark"] {
+            --primary-color: #5a72f0;
+            --secondary-color: #4a56d4;
+            --light-color: #212529;
+            --dark-color: #f8f9fa;
+            --body-bg: #121212;
+            --card-bg: #1e1e1e;
+            --text-color: #e0e0e0;
+            --muted-text: #a0a0a0;
+        }
+        
         body {
             font-family: 'Poppins', sans-serif;
-            background-color: #f5f7ff;
-            color: #2b2d42;
+            background-color: var(--body-bg, #f5f7ff);
+            color: var(--text-color, #2b2d42);
+            transition: background-color 0.3s ease, color 0.3s ease;
         }
         
         .dashboard-header {
@@ -82,13 +134,14 @@ $upcoming_deadlines = mysqli_fetch_all(mysqli_stmt_get_result($deadlines_stmt), 
         }
         
         .stat-card {
-            background: white;
+            background: var(--card-bg, white);
             border-radius: 12px;
             padding: 1.5rem;
             margin-bottom: 1.5rem;
             box-shadow: 0 4px 12px rgba(0,0,0,0.05);
             transition: transform 0.3s ease, box-shadow 0.3s ease;
             border-left: 4px solid var(--primary-color);
+            color: var(--text-color, inherit);
         }
         
         .stat-card:hover {
@@ -97,7 +150,7 @@ $upcoming_deadlines = mysqli_fetch_all(mysqli_stmt_get_result($deadlines_stmt), 
         }
         
         .progress-container {
-            background: white;
+            background: var(--card-bg, white);
             border-radius: 12px;
             padding: 1.5rem;
             box-shadow: 0 4px 12px rgba(0,0,0,0.05);
@@ -105,7 +158,7 @@ $upcoming_deadlines = mysqli_fetch_all(mysqli_stmt_get_result($deadlines_stmt), 
         }
         
         .task-card {
-            background: white;
+            background: var(--card-bg, white);
             border-radius: 12px;
             padding: 1.5rem;
             margin-bottom: 1rem;
@@ -128,26 +181,103 @@ $upcoming_deadlines = mysqli_fetch_all(mysqli_stmt_get_result($deadlines_stmt), 
         
         .upcoming-item {
             padding: 1rem;
-            border-bottom: 1px solid #eee;
+            border-bottom: 1px solid var(--card-bg, #eee);
             transition: background-color 0.2s ease;
         }
         
         .upcoming-item:hover {
-            background-color: #f8f9fa;
+            background-color: rgba(0,0,0,0.05);
         }
         
-        .logout-btn {
-            background-color: transparent;
-            border: 1px solid white;
+        /* Windows 11 Style Power Button */
+        .power-btn {
+            position: relative;
+            background: transparent;
+            border: none;
             color: white;
-            padding: 0.375rem 0.75rem;
-            border-radius: 0.25rem;
+            font-size: 1.25rem;
+            cursor: pointer;
+            padding: 0.5rem;
+            border-radius: 50%;
             transition: all 0.3s ease;
+            width: 40px;
+            height: 40px;
+            display: flex;
+            align-items: center;
+            justify-content: center;
         }
         
-        .logout-btn:hover {
-            background-color: var(--danger-color);
-            border-color: var(--danger-color);
+        .power-btn:hover {
+            background: rgba(255,255,255,0.2);
+        }
+        
+        .power-options {
+            position: absolute;
+            top: 100%;
+            right: 0;
+            background: white;
+            border-radius: 8px;
+            box-shadow: 0 4px 12px rgba(0,0,0,0.15);
+            padding: 0.5rem 0;
+            min-width: 150px;
+            z-index: 1000;
+            display: none;
+            color: #333;
+        }
+        
+        .power-options.show {
+            display: block;
+        }
+        
+        .power-option {
+            padding: 0.5rem 1rem;
+            cursor: pointer;
+            transition: background-color 0.2s;
+        }
+        
+        .power-option:hover {
+            background-color: #f0f0f0;
+        }
+        
+        /* Dark Mode Toggle */
+        .theme-toggle {
+            background: transparent;
+            border: none;
+            color: white;
+            font-size: 1.25rem;
+            cursor: pointer;
+            padding: 0.5rem;
+            border-radius: 50%;
+            transition: all 0.3s ease;
+            width: 40px;
+            height: 40px;
+            display: flex;
+            align-items: center;
+            justify-content: center;
+            margin-right: 0.5rem;
+        }
+        
+        .theme-toggle:hover {
+            background: rgba(255,255,255,0.2);
+        }
+        
+        /* Dark mode specific styles */
+        [data-bs-theme="dark"] .card {
+            background-color: var(--card-bg);
+            color: var(--text-color);
+        }
+        
+        [data-bs-theme="dark"] .text-muted {
+            color: var(--muted-text) !important;
+        }
+        
+        [data-bs-theme="dark"] .power-options {
+            background: #2d2d2d;
+            color: #e0e0e0;
+        }
+        
+        [data-bs-theme="dark"] .power-option:hover {
+            background-color: #3d3d3d;
         }
         
         /* Responsive adjustments */
@@ -184,12 +314,45 @@ $upcoming_deadlines = mysqli_fetch_all(mysqli_stmt_get_result($deadlines_stmt), 
                     <h1 class="mb-0">Task Dashboard</h1>
                     <p class="mb-0">Welcome back, <?= htmlspecialchars($_SESSION['user_name']) ?>!</p>
                 </div>
-                <div class="col-md-4 text-md-end">
-                    <button class="logout-btn" onclick="confirmLogout()">
-                        <i class="bi bi-box-arrow-right"></i> Logout
+                <div class="col-md-4 text-md-end d-flex align-items-center justify-content-end">
+
+                  <!-- ===== ADDED NOTIFICATION BELL ===== -->
+                    <div class="notification-icon">
+                        <i class="bi bi-bell notification-bell" id="notificationBell"></i>
+                        <?php if ($unread_notifications > 0): ?>
+                            <span class="notification-badge" id="notificationBadge"><?= $unread_notifications ?></span>
+                        <?php endif; ?>
+                    </div>
+
+                    <!-- Dark Mode Toggle -->
+                    <button class="theme-toggle" id="themeToggle">
+                        <i class="bi bi-moon-fill"></i>
                     </button>
+                    
+                    <!-- Windows 11 Style Power Button -->
+                    <div class="position-relative">
+                        <button class="power-btn" id="powerButton">
+                            <i class="bi bi-power"></i>
+                        </button>
+                        <div class="power-options" id="powerOptions">
+                            <div class="power-option" onclick="confirmLogout()">
+                                <i class="bi bi-box-arrow-right me-2"></i> Logout
+                            </div>
+                        </div>
+                    </div>
                 </div>
             </div>
+        </div>
+    </div>
+
+        <!-- ===== ADDED NOTIFICATION TOAST ===== -->
+    <div class="toast-notification">
+        <div id="liveToast" class="toast" role="alert" aria-live="assertive" aria-atomic="true">
+            <div class="toast-header">
+                <strong class="me-auto">New Task</strong>
+                <button type="button" class="btn-close" data-bs-dismiss="toast" aria-label="Close"></button>
+            </div>
+            <div class="toast-body" id="toastMessage"></div>
         </div>
     </div>
 
@@ -332,11 +495,108 @@ $upcoming_deadlines = mysqli_fetch_all(mysqli_stmt_get_result($deadlines_stmt), 
 
     <script src="https://cdn.jsdelivr.net/npm/bootstrap@5.3.0/dist/js/bootstrap.bundle.min.js"></script>
     <script>
+         // ===== ADDED NOTIFICATION FUNCTIONALITY ===== //
+        document.addEventListener('DOMContentLoaded', function() {
+            const notificationBell = document.getElementById('notificationBell');
+            const toastLiveExample = document.getElementById('liveToast');
+            
+            // Check for new notifications every 5 seconds
+            function checkNotifications() {
+                fetch('includes/get_notifications.php')
+                    .then(response => response.json())
+                    .then(data => {
+                        const badge = document.getElementById('notificationBadge');
+                        
+                        if (data.unread > 0) {
+                            // Create badge if it doesn't exist
+                            if (!badge) {
+                                const newBadge = document.createElement('span');
+                                newBadge.id = 'notificationBadge';
+                                newBadge.className = 'notification-badge';
+                                newBadge.textContent = data.unread;
+                                notificationBell.parentNode.appendChild(newBadge);
+                            } else {
+                                badge.textContent = data.unread;
+                            }
+                            
+                            // Show toast for new notifications
+                            if (data.new_notification) {
+                                const toast = new bootstrap.Toast(toastLiveExample);
+                                document.getElementById('toastMessage').textContent = data.latest_message;
+                                toast.show();
+                            }
+                        } else if (badge) {
+                            badge.remove();
+                        }
+                    });
+            }
+            
+            // Initial check and set interval
+            checkNotifications();
+            setInterval(checkNotifications, 5000);
+            
+            // Notification bell click handler
+            notificationBell.addEventListener('click', function() {
+                // Mark notifications as read
+                fetch('includes/mark_notifications_read.php')
+                    .then(() => {
+                        const badge = document.getElementById('notificationBadge');
+                        if (badge) badge.remove();
+                        window.location.href = 'tasks.php'; // Or your notifications page
+                    });
+            });
+        });
+        // ===== END OF ADDED FUNCTIONALITY ===== //
+
+        // Power Button Functionality
+        const powerButton = document.getElementById('powerButton');
+        const powerOptions = document.getElementById('powerOptions');
+        
+        powerButton.addEventListener('click', (e) => {
+            e.stopPropagation();
+            powerOptions.classList.toggle('show');
+        });
+        
+        // Close power options when clicking elsewhere
+        document.addEventListener('click', () => {
+            powerOptions.classList.remove('show');
+        });
+        
+        // Prevent power options from closing when clicking inside
+        powerOptions.addEventListener('click', (e) => {
+            e.stopPropagation();
+        });
+        
         function confirmLogout() {
             if (confirm("Are you sure you want to logout?")) {
-                window.location.href = "user_login.php";
+                window.location.href = "logout.php";
             }
         }
+        
+        // Dark Mode Toggle Functionality
+        const themeToggle = document.getElementById('themeToggle');
+        const htmlElement = document.documentElement;
+        const icon = themeToggle.querySelector('i');
+        
+        // Check for saved theme preference
+        const currentTheme = localStorage.getItem('theme') || 'light';
+        if (currentTheme === 'dark') {
+            htmlElement.setAttribute('data-bs-theme', 'dark');
+            icon.classList.replace('bi-moon-fill', 'bi-sun-fill');
+        }
+        
+        themeToggle.addEventListener('click', () => {
+            if (htmlElement.getAttribute('data-bs-theme') === 'dark') {
+                htmlElement.setAttribute('data-bs-theme', 'light');
+                icon.classList.replace('bi-sun-fill', 'bi-moon-fill');
+                localStorage.setItem('theme', 'light');
+            } else {
+                htmlElement.setAttribute('data-bs-theme', 'dark');
+                icon.classList.replace('bi-moon-fill', 'bi-sun-fill');
+                localStorage.setItem('theme', 'dark');
+            }
+        });
+        
     </script>
 </body>
 </html>
