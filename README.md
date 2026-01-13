@@ -5,7 +5,6 @@
 ![Bootstrap](https://img.shields.io/badge/Bootstrap-5.3-orange.svg)
 
 A secure web application for task management with role-based access control (Admin/User).
-<br>
 
 ## ✨ Features
 
